@@ -522,7 +522,7 @@ static void rqbalance_work_func(struct work_struct *work)
 		cpu = get_slowest_cpu_n();
 		if (cpu < nr_cpu_ids) {
 			up = false;
-			if (cpu_highest_speed() > 98) {
+			if (cpu_highest_speed() > 65) {
 				rqbalance_state = UP;
 				queue_delayed_work(rqbalance_wq,
 					&rqbalance_work, recheck_delay);
