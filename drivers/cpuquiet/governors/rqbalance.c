@@ -91,11 +91,10 @@ static DEFINE_PER_CPU(unsigned int, cpu_load);
 
 static struct timer_list load_timer;
 static bool load_timer_active;
-static bool soc_is_hmp;
 static unsigned int available_clusters = 0;
 
 /* configurable parameters */
-static unsigned int  balance_level = 60;
+static unsigned int  balance_level = 40;
 static unsigned int  idle_bottom_freq[MAX_CLUSTERS];
 static unsigned int  idle_top_freq[MAX_CLUSTERS];
 static unsigned int  num_of_cores[MAX_CLUSTERS];
@@ -248,18 +247,12 @@ static inline int get_offline_core(int cluster)
  */
 static unsigned int nr_run_thresholds[] = {
 /*      1,	2,	3,	4 (target on-line num of cpus) */
-	150,	400,	500,	520,
-
-/*	5,	6,	7,	8 (HMP target on-line num of CPUs) */
-	550,	640,	750,	UINT_MAX
+	65,	145,	300,	UINT_MAX
 };
 
 static unsigned int nr_down_run_thresholds[] = {
 /*	1,	2,	3,	4 (target off-line num of cpus) */
-	0,	80,	290,	360,
-
-/*	5,	6,	7,	8 (HMP target off-line num of CPUs) */
-	440,	500,	550,	680
+	0,	35,	95,	160
 };
 
 /*
@@ -419,7 +412,7 @@ static CPU_SPEED_BALANCE balanced_speed_balance(void)
 	unsigned long balanced_speed = highest_speed * balance_level / 100;
 	unsigned long skewed_speed = balanced_speed / 2;
 	unsigned int nr_cpus = num_online_cpus();
-	unsigned int max_cpus = pm_qos_request(PM_QOS_MAX_ONLINE_CPUS) ? : CONFIG_NR_CPUS;
+	unsigned int max_cpus = pm_qos_request(PM_QOS_MAX_ONLINE_CPUS) ? : 4;
 
 	unsigned int avg_nr_run = get_nr_run_avg();
 	unsigned int nr_run;
@@ -474,17 +467,6 @@ static CPU_SPEED_BALANCE balanced_speed_balance(void)
 
 	/* Otherwise, we have to online one more CPU */
 	return CPU_UPCORE;
-}
-
-static void hotplug_smp_final_decision(unsigned int cpu, bool up)
-{
-	if (up)
-		/* TODO: If we just put another CPU online, reduce the frequency of
-		 * the CPU since we have increased the overall computational
-		 * power of the processor. */
-		cpuquiet_wake_cpu(cpu, false);
-	else
-		cpuquiet_quiesce_cpu(cpu, false);
 }
 
 static void hotplug_hmp_final_decision(unsigned int cpu, bool up)
@@ -577,10 +559,7 @@ static void rqbalance_work_func(struct work_struct *work)
 
 	if (cpu < nr_cpu_ids) {
 		last_change_time = now;
-		if (!soc_is_hmp)
-			hotplug_smp_final_decision(cpu, up);
-		else
-			hotplug_hmp_final_decision(cpu, up);
+		hotplug_hmp_final_decision(cpu, up);
 	}
 }
 
@@ -595,9 +574,8 @@ static int balanced_cpufreq_transition(struct notifier_block *nb,
 	 * If we have at least one BIG CPU online, then take
 	 * a decision based on calculations made on BIG.
 	 */
-	if (soc_is_hmp)
-		if (num_online_cluster_cpus(CLUSTER_BIG) > 0)
-			n = 1;
+	if (num_online_cluster_cpus(CLUSTER_BIG) > 0)
+		n = 1;
 
 	if (state == CPUFREQ_POSTCHANGE) {
 		cpu_freq = freqs->new;
@@ -858,10 +836,6 @@ static int rqbalance_get_package_info(void)
 				table[(count / 2) - 2].frequency;
 	};
 
-	/* TODO: Check if we are effectively using HMP!!! This is NOT OK!!! */
-	soc_is_hmp = (available_clusters > 1) ? true : false;
-	pr_info("rqbalance: running as %s\n", soc_is_hmp ? "hmp" : "smp");
-
 	return 0;
 }
 
@@ -916,12 +890,6 @@ static int rqbalance_start(void)
 	/* Set value as target MAX on-line number of CPUs */
 	if (nr_run_thresholds[max_cpu_id] != UINT_MAX)
 		nr_run_thresholds[max_cpu_id] = UINT_MAX;
-
-	/* HACK: Adjust dual-core thresholds for non-HMP SoCs */
-	if (!soc_is_hmp) {
-		nr_run_thresholds[0] = 250;
-		nr_down_run_thresholds[1] = 110;
-	}
 
 	cpufreq_register_notifier(&balanced_cpufreq_nb,
 		CPUFREQ_TRANSITION_NOTIFIER);
