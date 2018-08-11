@@ -178,6 +178,7 @@ static void cpuquiet_work_func(struct work_struct *work)
 	/* always keep CPU0 online */
 	cpumask_set_cpu(0, &online);
 	cpu_online = *cpu_online_mask;
+	cpumask_clear_cpu(0, &offline);
 
 	if (max_cpus < min_cpus)
 		max_cpus = min_cpus;
@@ -193,7 +194,7 @@ static void cpuquiet_work_func(struct work_struct *work)
 		}
 	} else if (nr_cpus > max_cpus) {
 		count = nr_cpus - max_cpus;
-		cpu = 1;
+		cpu = 0;
 		for (; count > 0; count--) {
 			/* CPU0 should always be online */
 			cpu = cpumask_next(cpu, &online);

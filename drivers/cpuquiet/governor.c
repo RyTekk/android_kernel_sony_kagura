@@ -50,6 +50,10 @@ int cpuquiet_switch_governor(struct cpuquiet_governor *gov)
 {
 	int err = 0;
 
+	/* Governor is already set, bail early */
+	if (cpuquiet_curr_governor == gov)
+		return err;
+
 	if (cpuquiet_curr_governor) {
 		if (cpuquiet_curr_governor->stop)
 			cpuquiet_curr_governor->stop();
