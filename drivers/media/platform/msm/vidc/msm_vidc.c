@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/cpu.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <media/msm_vidc.h>
@@ -1133,12 +1134,26 @@ static bool msm_vidc_check_for_inst_overload(struct msm_vidc_core *core)
 	return overload;
 }
 
+static void msm_vidc_hotplug(unsigned int cpu, bool online)
+{
+	struct device *dev;
+
+	lock_device_hotplug();
+	dev = get_cpu_device(cpu);
+	if (online)
+		device_online(dev);
+	else
+		device_offline(dev);
+	unlock_device_hotplug();
+}
+
 void *msm_vidc_open(int core_id, int session_type)
 {
 	struct msm_vidc_inst *inst = NULL;
 	struct msm_vidc_core *core = NULL;
 	int rc = 0;
 	int i = 0;
+	unsigned int cpu, nr_cpu;
 	if (core_id >= MSM_VIDC_CORES_MAX ||
 			session_type >= MSM_VIDC_MAX_DEVICES) {
 		dprintk(VIDC_ERR, "Invalid input, core_id = %d, session = %d\n",
@@ -1242,6 +1257,21 @@ void *msm_vidc_open(int core_id, int session_type)
 	inst->debugfs_root =
 		msm_vidc_debugfs_init_inst(inst, core->debugfs_root);
 
+	nr_cpu = num_online_cpus();
+	if (nr_cpu > 3) {
+		for_each_online_cpu(cpu) {
+			if (topology_physical_package_id(cpu) != 1 ||
+					cpu == 2)
+				continue;
+			msm_vidc_hotplug(cpu, false);
+			pr_info(VIDC_DBG_TAG "CPU%d is down\n",
+				VIDC_MSG_PRIO2STRING(VIDC_INFO), cpu);
+			nr_cpu--;
+		}
+	}
+	pr_info(VIDC_DBG_TAG "Total online CPU: %d\n",
+		VIDC_MSG_PRIO2STRING(VIDC_INFO), nr_cpu);
+
 	return inst;
 fail_init:
 	v4l2_fh_del(&inst->event_handler);
@@ -1343,6 +1373,7 @@ int msm_vidc_destroy(struct msm_vidc_inst *inst)
 
 int msm_vidc_close(void *instance)
 {
+	unsigned int cpu, nr_cpu;
 	void close_helper(struct kref *kref)
 	{
 		struct msm_vidc_inst *inst = container_of(kref,
@@ -1391,6 +1422,18 @@ int msm_vidc_close(void *instance)
 	msm_smem_delete_client(inst->mem_client);
 
 	kref_put(&inst->kref, close_helper);
+
+	for_each_possible_cpu(cpu) {
+		if (cpu_online(cpu))
+			continue;
+		msm_vidc_hotplug(cpu, true);
+		pr_info(VIDC_DBG_TAG "CPU%d is up\n",
+			VIDC_MSG_PRIO2STRING(VIDC_INFO), cpu);
+	}
+	nr_cpu = num_online_cpus();
+	pr_info(VIDC_DBG_TAG "Total online CPU: %d\n",
+		VIDC_MSG_PRIO2STRING(VIDC_INFO), nr_cpu);
+
 	return 0;
 }
 EXPORT_SYMBOL(msm_vidc_close);
